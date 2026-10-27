@@ -1,11 +1,12 @@
-import { getChatGPTUser } from '../../chatgpt-auth';
-import { snapshot, saveRecord, saveProfile, profileExists, deleteRecord, deleteProfile } from '../../../lib/repository';
-import { mutationSchema, deleteSchema, schemas, profileSchema } from '../../../lib/model';
+import { getOwnerAccess } from '../../../lib/owner';
+import { snapshot, saveProfile, deleteRecord, deleteProfile } from '../../../lib/repository';
+import { createRecordForUser, updateRecordForUser } from '../../../lib/data-service';
+import { mutationSchema, deleteSchema, profileSchema } from '../../../lib/model';
 import { ZodError } from 'zod';
 export const dynamic='force-dynamic';
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 async function run(request:Request,action:'read'|'save'|'delete'){
-  const user=await getChatGPTUser(); if(!user)return json({error:'请先登录'},401);
+  const {user,response}=await getOwnerAccess(); if(!user)return response!;
   if(action!=='read'){
     const origin=request.headers.get('origin');
     if(origin && origin!==new URL(request.url).origin)return json({error:'不允许跨站写入'},403);
@@ -19,10 +20,8 @@ async function run(request:Request,action:'read'|'save'|'delete'){
       const mutation=mutationSchema.parse(body);
       if(mutation.kind==='profile')await saveProfile(user.userId,profileSchema.parse(mutation.data),mutation.id);
       else{
-        const parsed=schemas[mutation.kind].parse(mutation.data);
-        const profileId=parsed.profileId??'self';
-        if(!await profileExists(user.userId,profileId))return json({error:'用户不存在或无权访问'},404);
-        await saveRecord(user.userId,mutation.kind,{...parsed,profileId},mutation.id);
+        if(mutation.id)await updateRecordForUser(user.userId,mutation.kind,mutation.id,mutation.data,mutation.expectedUpdatedAt!,'web');
+        else await createRecordForUser(user.userId,mutation.kind,mutation.data,undefined,'web');
       }
     }
     else{const {kind,id}=deleteSchema.parse(body);if(kind==='profile')await deleteProfile(user.userId,id);else await deleteRecord(user.userId,kind,id);}
@@ -31,6 +30,9 @@ async function run(request:Request,action:'read'|'save'|'delete'){
     if(e instanceof ZodError)return json({error:e.issues.map(i=>i.message).join('；')},400);
     if(e instanceof SyntaxError)return json({error:'JSON 格式错误'},400);
     if(e instanceof Error&&e.message==='NOT_FOUND')return json({error:'记录不存在或无权访问'},404);
+    if(e instanceof Error&&e.message==='PROFILE_NOT_FOUND')return json({error:'用户不存在或无权访问'},404);
+    if(e instanceof Error&&e.message==='VERSION_CONFLICT')return json({error:'这条记录已在其他位置更新。你的编辑仍然保留，请重新打开最新记录后合并修改。',code:'VERSION_CONFLICT'},409);
+    if(e instanceof Error&&e.message==='IDEMPOTENCY_CONFLICT')return json({error:'请求标识已被其他记录使用',code:'IDEMPOTENCY_CONFLICT'},409);
     if(e instanceof Error&&e.message==='PROFILE_HAS_DATA')return json({error:'该用户仍有训练、计划或指标记录'},409);
     console.error('Data operation failed',e);return json({error:'保存或读取失败，请稍后重试'},500);
   }

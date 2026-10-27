@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptySet } from '../lib/model.ts';
 import { exerciseGroups, addSetToExercise } from '../lib/exercise-groups.ts';
-import { parsePlanText, toTrainingSets } from '../lib/import-plan.ts';
+import { parsePlanText, repairRecognizedPlan, toTrainingSets, parsedPlanSchema } from '../lib/import-plan.ts';
 
 test('每个动作有独立组，新增组插入所属动作，重复名称也不合并',()=>{
   const first={...emptySet(),exercise:'卧推',weight:60};
@@ -67,4 +67,28 @@ test('按组导入 MCV 数值，速度范围无法对应到具体组时不猜测
   const parsed=parsePlanText('负重杠铃CMJ 3组3次\n记录：MCV 0.51 m/s，0.63 m/s，0.72 m/s');
   const {sets}=toTrainingSets(parsed);
   assert.deepEqual(sets.map(set=>set.mcv),[0.51,0.63,0.72]);
+});
+
+test('AI 把日期或其他大数字误识别为次数时忽略异常组并给出提示',()=>{
+  const repaired=repairRecognizedPlan({title:'测试',warnings:[],exercises:[
+    {name:'深蹲',muscle:'腿部',sets:[
+      {weight:60,reps:20261023,durationSeconds:null,restSeconds:null,mcv:null,rpe:null,warmup:false,notes:''},
+      {weight:60,reps:8,durationSeconds:null,restSeconds:null,mcv:null,rpe:null,warmup:false,notes:''},
+    ]},
+  ]});
+  const parsed=parsedPlanSchema.parse(repaired);
+  assert.equal(parsed.exercises[0].sets.length,1);
+  assert.equal(parsed.exercises[0].sets[0].reps,8);
+  assert.ok(parsed.warnings?.some(warning=>warning.includes('20261023')));
+});
+
+test('计时组的异常次数被清空但明确时长得到保留',()=>{
+  const repaired=repairRecognizedPlan({exercises:[
+    {name:'有氧激活',muscle:'有氧',sets:[
+      {weight:null,reps:1800,durationSeconds:180,restSeconds:null,mcv:null,rpe:null,warmup:true,notes:''},
+    ]},
+  ]});
+  const parsed=parsedPlanSchema.parse(repaired);
+  assert.equal(parsed.exercises[0].sets[0].reps,null);
+  assert.equal(parsed.exercises[0].sets[0].durationSeconds,180);
 });

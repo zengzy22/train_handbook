@@ -8,6 +8,20 @@
       "when": 1792554405144,
       "tag": "0000_shocking_dust",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793001521483,
+      "tag": "0001_nasty_jimmy_woo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793001710793,
+      "tag": "0002_melted_molten_man",
+      "breakpoints": true
     }
   ]
 }

@@ -4,7 +4,7 @@ import { emptyWorkout, emptySet, dateSchema, workoutSchema, planSchema, metricSc
 import type { Workout, Snapshot } from '../lib/model.ts';
 import { volume, summarize, estimated1RM, toCSV, csvCell } from '../lib/analytics.ts';
 const set=()=>({...emptySet(),exercise:'杠铃卧推',weight:60,reps:8,completed:true,rpe:8});
-const workout=(patch:Partial<Workout>={}):Workout=>({...emptyWorkout('2026-10-21'),id:crypto.randomUUID(),createdAt:'2026-10-21T01:00:00Z',updatedAt:'2026-10-21T01:00:00Z',status:'completed',sets:[set()],...patch});
+const workout=(patch:Partial<Workout>={}):Workout=>({...emptyWorkout('2026-10-21'),id:crypto.randomUUID(),createdVia:'web',updatedVia:'mcp',createdAt:'2026-10-21T01:00:00Z',updatedAt:'2026-10-21T01:00:00Z',status:'completed',sets:[set()],...patch});
 test('容量只包括结束训练中完成的非热身组，自重不虚构额外重量',()=>{
  const w=workout({sets:[set(),{...set(),warmup:true},{...set(),completed:false},{...set(),weight:0}]});
  assert.equal(volume(w),480);assert.equal(volume({...w,status:'draft'}),0);
@@ -51,7 +51,9 @@ test('身体指标至少有一项；计划至少包含一个合法动作',()=>{
 });
 test('导出保留原始组、关联ID和草稿状态，正确转义文本并防表格公式执行',()=>{
  assert.equal(csvCell('=HYPERLINK("evil")'),'"\'=HYPERLINK(""evil"")"');assert.equal(csvCell('line1\nline2'),'"line1\nline2"');assert.equal(csvCell(-5),'-5');
- const w=workout({name:'推日, 胸部',status:'draft'});const data:Snapshot={schemaVersion:3,exportedAt:'2026-10-21',timezone:'Asia/Shanghai',profiles:[{id:'self',name:'曾昭瑜',birthDate:null,sex:null,heightCm:null,notes:'',createdAt:'2026-10-21',updatedAt:'2026-10-21'}],workouts:[w],plans:[],metrics:[]};
+ const w=workout({name:'推日, 胸部',status:'draft'});const data:Snapshot={schemaVersion:4,exportedAt:'2026-10-21',timezone:'Asia/Shanghai',profiles:[{id:'self',name:'曾昭瑜',birthDate:null,sex:null,heightCm:null,notes:'',createdVia:'web',updatedVia:'web',createdAt:'2026-10-21',updatedAt:'2026-10-21'}],workouts:[w],plans:[],metrics:[]};
+ for(const kind of ['profiles','workouts','sets','plans','metrics'] as const){assert.ok(toCSV(data,kind).includes('createdVia'));assert.ok(toCSV(data,kind).includes('updatedVia'));}
+ assert.ok(toCSV(data,'workouts').includes('mcp'));assert.equal(JSON.parse(JSON.stringify(data)).workouts[0].updatedVia,'mcp');
  const csv=toCSV(data,'sets');assert.ok(csv.includes(w.id));assert.ok(csv.includes('draft'));assert.ok(csv.includes('杠铃卧推'));assert.ok(csv.includes('"推日, 胸部"'));
  assert.ok(toCSV({...data,workouts:[]},'workouts').includes('calorieSource'));
  assert.ok(toCSV(data,'profiles').includes('曾昭瑜'));assert.ok(toCSV(data,'workouts').includes('self'));

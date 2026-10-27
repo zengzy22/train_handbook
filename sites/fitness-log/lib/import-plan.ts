@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { setSchema, type TrainingSet } from './model.ts';
+import { setSchema, rpeSchema, type TrainingSet } from './model.ts';
 
 const muscleSchema = z.enum(['胸部','背部','腿部','肩部','手臂','核心','全身','有氧']);
 const count = z.number().int().min(1).max(1000).nullable().default(null);
@@ -15,7 +15,7 @@ const importedSetSchema = z.object({
   restSeconds:seconds,restMaxSeconds:seconds.optional(),
   mcv:velocity,
   components:z.array(componentSchema).min(2).max(10).optional(),
-  rpe:z.number().finite().min(1).max(10).nullable().default(null),
+  rpe:rpeSchema.default(null),
   warmup:z.boolean().default(false),notes:z.string().max(500).default(''),
 });
 export const parsedPlanSchema = z.object({
@@ -28,6 +28,54 @@ export const parsedPlanSchema = z.object({
 export type ParsedPlan = z.infer<typeof parsedPlanSchema>;
 type LocalSet = z.input<typeof importedSetSchema>;
 type LocalExercise = {name:string;muscle:z.infer<typeof muscleSchema>;sets:LocalSet[];pendingCount:number;warmup:boolean;notes:string[]};
+
+const validImportedCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000;
+const validImportedSeconds = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 86_400;
+
+// Model output is untrusted. Preserve explicit usable data, but never clamp or invent
+// an implausible repetition count: it may be a date, duration, percentage, or OCR noise.
+export function repairRecognizedPlan(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const source=value as Record<string,unknown>;
+  if (!Array.isArray(source.exercises)) return value;
+  const warnings=Array.isArray(source.warnings)?source.warnings.filter((item):item is string=>typeof item==='string'):[];
+  const addWarning=(message:string)=>{if(warnings.length<30)warnings.push(message.slice(0,200));};
+  const exercises=source.exercises.flatMap((entry,exerciseIndex)=>{
+    if(!entry||typeof entry!=='object'||Array.isArray(entry))return [entry];
+    const exercise={...(entry as Record<string,unknown>)};
+    if(!Array.isArray(exercise.sets))return [exercise];
+    const name=typeof exercise.name==='string'&&exercise.name.trim()?exercise.name.trim():`第 ${exerciseIndex+1} 个动作`;
+    const sets=exercise.sets.flatMap((entrySet,setIndex)=>{
+      if(!entrySet||typeof entrySet!=='object'||Array.isArray(entrySet))return [entrySet];
+      const set={...(entrySet as Record<string,unknown>)};
+      if(set.reps!==null && set.reps!==undefined && !validImportedCount(set.reps)){
+        addWarning(`${name}第 ${setIndex+1} 组：识别到异常次数“${String(set.reps)}”，已忽略`);
+        set.reps=null;
+      }
+      if(Array.isArray(set.components)){
+        set.components=set.components.flatMap((part,partIndex)=>{
+          if(!part||typeof part!=='object'||Array.isArray(part))return [part];
+          const component={...(part as Record<string,unknown>)};
+          if(component.reps!==null && component.reps!==undefined && !validImportedCount(component.reps)){
+            addWarning(`${name}第 ${setIndex+1} 组子动作 ${partIndex+1}：识别到异常次数“${String(component.reps)}”，已忽略`);
+            component.reps=null;
+          }
+          return [component];
+        });
+      }
+      const hasComponents=Array.isArray(set.components)&&set.components.length>=2;
+      const hasReps=validImportedCount(set.reps);
+      const hasDuration=validImportedSeconds(set.durationSeconds);
+      if(!hasComponents&&!hasReps&&!hasDuration){
+        addWarning(`${name}第 ${setIndex+1} 组：没有可确认的次数或时间，未导入`);
+        return [];
+      }
+      return [set];
+    });
+    return sets.length?[{...exercise,sets}]:[];
+  });
+  return {...source,warnings:[...new Set(warnings)].slice(0,30),exercises};
+}
 
 export function toTrainingSets(plan: ParsedPlan): {sets: TrainingSet[]; warnings: string[]} {
   const parsed = parsedPlanSchema.parse(plan);

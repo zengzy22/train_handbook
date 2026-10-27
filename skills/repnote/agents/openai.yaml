@@ -1,0 +1,11 @@
+interface:
+  display_name: "Repnote · 训练手记"
+  short_description: "连接 Repnote，查询训练与身体趋势，并按要求安全创建或更新记录"
+  default_prompt: "使用 $repnote 查看我的近期训练，并按我的要求记录训练或身体指标。"
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "repnote"
+      description: "Repnote 远程 MCP，需要站点所有者通过 OAuth 授权"
+      transport: "streamable_http"
+      url: "https://repnote-training-journal.tukututata.chatgpt.site/agent/mcp"

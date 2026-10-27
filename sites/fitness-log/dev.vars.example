@@ -1,0 +1,3 @@
+# Local-only preview values. Copy to ignored .dev.vars before running a preview.
+REPNOTE_OWNER_ID=local_seedy
+REPNOTE_ORIGIN=http://127.0.0.1:5174

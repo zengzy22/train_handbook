@@ -32,4 +32,4 @@ No established commit convention exists. Use concise imperative subjects. PRs sh
 
 ## Security & Agent Instructions
 
-Every data operation must scope by authenticated Site user ID. MCP remains read-only. Preserve null for unknown health values and distinguish estimates from measurements. Never commit credentials or ignored runtime state. Trace affected consumers, fix root causes, and prefer the smallest sufficient change.
+Every data operation must scope by the authenticated Site owner ID. MCP may create and update training records, plans, and body metrics only through the shared validated service, with idempotent creates and version-checked updates. Delegated MCP requires OAuth scopes; deletion stays in the web UI. Preserve null for unknown health values and distinguish estimates from measurements. Never commit credentials or ignored runtime state. Trace affected consumers, fix root causes, and prefer the smallest sufficient change.

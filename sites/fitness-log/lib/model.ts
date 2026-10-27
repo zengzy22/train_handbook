@@ -6,6 +6,7 @@ export const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v => {
 }, '请输入有效日期');
 const optionalNumber = (min: number, max: number) => z.number().finite().min(min).max(max).nullable();
 const timedTarget = z.number().int().min(1).max(86_400).nullable();
+export const rpeSchema = z.number().finite().min(0).max(10).multipleOf(0.5,'RPE 请填写 0–10 之间的 0.5 刻度').nullable();
 export const setComponentSchema = z.object({
   exercise: z.string().trim().min(1).max(100), weight: optionalNumber(0,1500),
   reps: z.number().int().min(1).max(1000).nullable(),
@@ -30,7 +31,7 @@ export const setSchema = z.object({
   restSeconds: timedTarget.optional(), restMaxSeconds: timedTarget.optional(),
   mcv: optionalNumber(0,20).optional(),
   components: z.array(setComponentSchema).min(2).max(10).optional(), notes: z.string().max(500).optional(),
-  rpe: optionalNumber(1, 10), completed: z.boolean(), warmup: z.boolean(),
+  rpe: rpeSchema, completed: z.boolean(), warmup: z.boolean(),
 }).strict().superRefine((v,ctx)=>{
   if(!v.components?.length && v.reps===null && (v.durationSeconds===undefined || v.durationSeconds===null))ctx.addIssue({code:'custom',message:'每组至少填写次数或时间'});
   if(v.components?.length && (v.reps!==null || (v.durationSeconds!==undefined && v.durationSeconds!==null)))ctx.addIssue({code:'custom',message:'组合动作的次数和时间请填写在子动作中'});
@@ -65,18 +66,19 @@ export type WorkoutInput = z.infer<typeof workoutSchema>;
 export type PlanInput = z.infer<typeof planSchema>;
 export type MetricInput = z.infer<typeof metricSchema>;
 export type ProfileInput = z.infer<typeof profileSchema>;
-export type Metadata = { id: string; createdAt: string; updatedAt: string };
+export type Via = 'web' | 'mcp';
+export type Metadata = { id: string; createdAt: string; updatedAt: string; createdVia: Via; updatedVia: Via };
 export type Workout = WorkoutInput & Metadata;
 export type Plan = PlanInput & Metadata;
 export type Metric = MetricInput & Metadata;
 export type Profile = ProfileInput & Metadata;
 export type Kind = 'workout' | 'plan' | 'metric';
-export type Snapshot = { schemaVersion: 3; exportedAt: string; timezone: 'Asia/Shanghai'; profiles: Profile[]; workouts: Workout[]; plans: Plan[]; metrics: Metric[] };
+export type Snapshot = { schemaVersion: 4; exportedAt: string; timezone: 'Asia/Shanghai'; profiles: Profile[]; workouts: Workout[]; plans: Plan[]; metrics: Metric[] };
 export const schemas = {workout: workoutSchema, plan: planSchema, metric: metricSchema};
 export const mutationSchema = z.discriminatedUnion('kind', [
   z.object({kind:z.literal('profile'),id:profileIdSchema.optional(),data:z.unknown()}).strict(),
-  z.object({kind:z.enum(['workout','plan','metric']),id:z.string().uuid().optional(),data:z.unknown()}).strict(),
-]);
+  z.object({kind:z.enum(['workout','plan','metric']),id:z.string().uuid().optional(),data:z.unknown(),expectedUpdatedAt:z.string().datetime().optional()}).strict(),
+]).superRefine((v,ctx)=>{if(v.kind!=='profile' && v.id && !v.expectedUpdatedAt)ctx.addIssue({code:'custom',path:['expectedUpdatedAt'],message:'编辑记录需要原始版本'});});
 export const deleteSchema = z.discriminatedUnion('kind', [
   z.object({kind:z.literal('profile'),id:z.string().uuid()}).strict(),
   z.object({kind:z.enum(['workout','plan','metric']),id:z.string().uuid()}).strict(),

@@ -1,69 +1,86 @@
 import assert from 'node:assert/strict';
-const origin=process.env.REPNOTE_TEST_ORIGIN??'http://127.0.0.1:5173';
+const origin=process.env.REPNOTE_TEST_ORIGIN??'http://127.0.0.1:5174';
 if(!['127.0.0.1','localhost'].includes(new URL(origin).hostname))throw new Error('Integration fixtures are local-only');
-const runId=crypto.randomUUID();const owners=['qa-'+runId,'qa-other-'+runId];const saved=[];
-async function call(path,{owner=owners[0],method='GET',body,extraHeaders={}}={}){
- const r=await fetch(origin+path,{method,headers:{...(owner?{'oai-authenticated-user-id':owner,'oai-authenticated-user-email':'qa@sites.test'}:{}),...(body?{'Content-Type':'application/json'}:{}),...extraHeaders},body:body?JSON.stringify(body):undefined});
- const text=await r.text();let data;try{data=JSON.parse(text);}catch{data=text;}return {status:r.status,data};
+const owner=process.env.REPNOTE_TEST_OWNER??'local_seedy',saved=[];
+const fixture='QA '+crypto.randomUUID();
+async function call(path,{user=owner,method='GET',body,extraHeaders={}}={}){
+  const r=await fetch(origin+path,{method,headers:{...(user?{'oai-authenticated-user-id':user,'oai-authenticated-user-email':'qa@sites.test'}:{}),...(body!==undefined?{'Content-Type':'application/json'}:{}),...extraHeaders},body:body!==undefined?JSON.stringify(body):undefined});
+  const text=await r.text();let data;try{data=JSON.parse(text);}catch{data=text;}return {status:r.status,data};
 }
-const set={id:crypto.randomUUID(),exercise:'QA Bench',muscle:'胸部',weight:60,reps:8,rpe:8,mcv:0.76,completed:true,warmup:false};
-const workout={name:'QA API workout',date:'2026-10-21',durationMinutes:45,calories:null,calorieSource:null,feeling:4,status:'completed',notes:'local disposable fixture',sets:[set]};
-const mcp=(name,args={},owner=owners[0])=>call('/mcp',{owner,method:'POST',body:{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}}});
+const rpc=(method,params={},options={})=>call('/mcp',{method:'POST',body:{jsonrpc:'2.0',id:1,method,params},...options});
+const mcp=(name,args={})=>rpc('tools/call',{name,arguments:args});
+const result=r=>JSON.parse(r.data.result.content[0].text).data;
+async function createProfile(){
+  const name=fixture+' profile '+crypto.randomUUID().slice(0,12);
+  const r=await call('/api/data',{method:'PUT',body:{kind:'profile',data:{name,birthDate:null,sex:null,heightCm:null,notes:'local fixture'}}});
+  assert.equal(r.status,200);const profile=r.data.profiles.find(p=>p.name===name);saved.push({kind:'profile',id:profile.id});return profile.id;
+}
+const set={id:crypto.randomUUID(),exercise:'QA Bench',muscle:'胸部',weight:60,reps:8,rpe:0,mcv:0.76,completed:true,warmup:false};
 try{
- assert.equal((await call('/api/data',{owner:null})).status,401);
- assert.equal((await call('/api/import-plan',{owner:null})).status,401);
- assert.equal((await call('/mcp',{owner:null,method:'POST',body:{jsonrpc:'2.0',id:1,method:'tools/list'}})).status,401);
- const importStatus=await call('/api/import-plan');assert.equal(importStatus.status,200);
- let imported=await call('/api/import-plan',{method:'POST',body:{text:'杠铃卧推 4组×8次 60kg\n引体向上 3组×6次'}});
- assert.equal(imported.status,200);assert.equal(imported.data.sets.length,7);assert.equal(imported.data.sets[0].completed,false);
- imported=await call('/api/import-plan',{method:'POST',body:{text:'热身\n3-5 min 有氧激活\n2组 徒手深蹲 + 半蹲跳\n深蹲10次 + 半蹲跳8次，组间休息45s'}});
- assert.equal(imported.status,200);assert.equal(imported.data.sets.length,3);
- assert.equal(imported.data.sets[0].durationSeconds,180);assert.equal(imported.data.sets[0].durationMaxSeconds,300);
- assert.equal(imported.data.sets[1].components[1].reps,8);assert.equal(imported.data.sets[1].restSeconds,45);
- assert.equal((await call('/api/import-plan',{method:'POST',body:{text:'卧推 3组×8次'},extraHeaders:{Origin:'https://external.invalid'}})).status,403);
- if(!importStatus.data.imageRecognitionAvailable)assert.equal((await call('/api/import-plan',{method:'POST',body:{imageDataUrl:'data:image/png;base64,AAAA'}})).status,503);
- let r=await call('/api/data');assert.equal(r.status,200);assert.equal(r.data.workouts.length,0);
- const timedSet={...set,id:crypto.randomUUID(),exercise:'QA timed',weight:0,reps:null,durationSeconds:120,durationMaxSeconds:180,completed:false};
-const comboSet={...set,id:crypto.randomUUID(),exercise:'QA squat + jump',weight:0,reps:null,components:[{exercise:'QA squat',weight:40,reps:10,durationSeconds:null,mcv:0.81},{exercise:'QA jump',weight:null,reps:8,durationSeconds:null,mcv:1.24}],restSeconds:45,completed:false};
- for(const [kind,data,key] of [['workout',workout,'workouts'],['plan',{name:'QA Plan',description:'target',sets:[{...set,completed:false},timedSet,comboSet]},'plans'],['metric',{date:'2026-10-21',weight:70,bodyFat:18,restingHeartRate:60,source:'manual',notes:'fixture'},'metrics']]){
-  r=await call('/api/data',{method:'PUT',body:{kind,data}});assert.equal(r.status,200);const record=r.data[key][0];assert.ok(record.id);saved.push({kind,id:record.id});
- }
- const original=await call('/api/data');assert.equal(original.data.schemaVersion,3);assert.equal(original.data.workouts.length,1);assert.equal(original.data.plans.length,1);assert.equal(original.data.metrics.length,1);
- assert.equal(original.data.workouts[0].sets[0].mcv,0.76);assert.equal(original.data.plans[0].sets[1].durationSeconds,120);assert.equal(original.data.plans[0].sets[2].components[1].reps,8);assert.equal(original.data.plans[0].sets[2].components[1].mcv,1.24);
- r=await call('/api/data',{owner:owners[1]});assert.equal(r.data.workouts.length,0);assert.equal(r.data.plans.length,0);assert.equal(r.data.metrics.length,0);
- assert.equal((await call('/api/data',{method:'PUT',owner:owners[1],body:{kind:'workout',id:saved[0].id,data:workout}})).status,404);
- assert.equal((await call('/api/data',{method:'DELETE',owner:owners[1],body:saved[0]})).status,404);
- r=await mcp('get_all_fitness_data');assert.equal(r.status,200);const snap=JSON.parse(r.data.result.content[0].text);assert.deepEqual(snap.data.workouts,original.data.workouts);assert.equal(snap.data.workouts[0].sets[0].mcv,0.76);assert.equal(snap.units.weight,'kg');
- r=await mcp('get_all_fitness_data',{},owners[1]);assert.equal(JSON.parse(r.data.result.content[0].text).data.workouts.length,0);
- r=await mcp('get_training_summary',{from:'2026-10-21',to:'2026-10-21'});assert.equal(JSON.parse(r.data.result.content[0].text).data.volumeKg,480);
- r=await mcp('list_workouts',{from:'2026-10-22'});assert.equal(JSON.parse(r.data.result.content[0].text).data.workouts.length,0);
- r=await mcp('list_workouts',{from:'2026-11-01',to:'2026-10-01'});assert.equal(r.data.result.isError,true);
- r=await call('/mcp',{method:'POST',body:{jsonrpc:'2.0',id:1,method:'tools/list'}});assert.equal(r.data.result.tools.length,6);assert.ok(r.data.result.tools.every(t=>t.annotations.readOnlyHint));
- r=await call('/mcp',{method:'POST',body:{jsonrpc:'2.0',id:1,method:'server/discover'}});assert.ok(r.data.result.supportedVersions.includes('2026-07-28'));
- assert.equal((await call('/api/data',{method:'PUT',body:{kind:'workout',data:{...workout,date:'2026-02-30'}}})).status,400);
- assert.equal((await call('/api/data',{method:'PUT',body:{kind:'workout',data:workout},extraHeaders:{Origin:'https://external.invalid'}})).status,403);
- r=await call('/api/data',{method:'PUT',body:{kind:'workout',id:saved[0].id,data:{...workout,name:'QA edited'}}});assert.equal(r.data.workouts[0].name,'QA edited');
- assert.equal((await call('/api/data')).data.workouts[0].name,'QA edited');
- assert.equal((await call('/api/data')).data.workouts[0].profileId,'self');
- const profileData={name:'QA second profile',birthDate:'1995-05-05',sex:'female',heightCm:170,notes:'local fixture'};
- r=await call('/api/data',{method:'PUT',body:{kind:'profile',data:profileData}});assert.equal(r.status,200);
- const profile=r.data.profiles.find(p=>p.name===profileData.name);assert.ok(profile?.id);saved.push({kind:'profile',id:profile.id});
- assert.equal((await call('/api/data',{method:'PUT',owner:owners[1],body:{kind:'metric',data:{date:'2026-10-21',weight:65,bodyFat:null,restingHeartRate:null,source:'manual',notes:'',profileId:profile.id}}})).status,404);
- assert.equal((await call('/api/data',{method:'DELETE',body:{kind:'profile',id:profile.id}})).status,200);
- r=await call('/api/data',{method:'PUT',body:{kind:'profile',data:profileData}});const second=r.data.profiles.find(p=>p.name===profileData.name);saved[saved.length-1]={kind:'profile',id:second.id};
- r=await call('/api/data',{method:'PUT',body:{kind:'workout',data:{...workout,name:'Second profile session',profileId:second.id}}});assert.equal(r.status,200);
- const secondWorkout=r.data.workouts.find(w=>w.profileId===second.id);saved.push({kind:'workout',id:secondWorkout.id});
- assert.equal((await call('/api/data',{method:'DELETE',body:{kind:'profile',id:second.id}})).status,409);
- r=await mcp('list_profiles');assert.equal(JSON.parse(r.data.result.content[0].text).data.profiles.length,2);
- r=await mcp('list_workouts');assert.equal(JSON.parse(r.data.result.content[0].text).data.workouts.length,1);
- r=await mcp('list_workouts',{profileId:second.id});assert.equal(JSON.parse(r.data.result.content[0].text).data.workouts[0].name,'Second profile session');
- r=await mcp('get_training_summary',{profileId:second.id});assert.equal(JSON.parse(r.data.result.content[0].text).data.volumeKg,480);
- r=await mcp('get_training_summary');assert.equal(JSON.parse(r.data.result.content[0].text).data.volumeKg,480);
- r=await mcp('list_training_plans',{profileId:second.id});assert.equal(JSON.parse(r.data.result.content[0].text).data.plans.length,0);
- r=await mcp('list_workouts',{profileId:crypto.randomUUID()});assert.equal(r.data.result.isError,true);
- r=await call('/api/data',{method:'PUT',body:{kind:'profile',id:second.id,data:{...profileData,name:'QA renamed'}}});assert.equal(r.data.profiles.find(p=>p.id===second.id).name,'QA renamed');
- console.log('PASS: anonymous rejection; import; CRUD; profile switching and isolation; cross-account denial; 6 read-only MCP tools; summaries; validation; CSRF.');
+  for(const path of ['/api/data','/api/import-plan','/api/agent-grants']){
+    assert.equal((await call(path,{user:null})).status,401);
+    assert.equal((await call(path,{user:'other-account'})).status,403);
+  }
+  assert.equal((await rpc('tools/list',{}, {user:null})).status,401);
+  assert.equal((await rpc('tools/list',{}, {user:'other-account'})).status,403);
+  const profileId=await createProfile();
+  const workout={profileId,name:fixture,date:'2026-10-21',durationMinutes:45,calories:null,calorieSource:null,feeling:4,status:'completed',notes:'local disposable fixture',sets:[set]};
+  const plan={profileId,name:fixture,description:'target',sets:[{...set,completed:false}]};
+  const metric={profileId,date:'2026-10-21',weight:70,bodyFat:null,restingHeartRate:null,source:'manual',notes:fixture};
+  for(const [kind,data,key] of [['workout',workout,'workouts'],['plan',plan,'plans'],['metric',metric,'metrics']]){
+    const r=await call('/api/data',{method:'PUT',body:{kind,data}});assert.equal(r.status,200);
+    const record=r.data[key].find(x=>x.profileId===profileId);assert.ok(record);assert.equal(record.createdVia,'web');saved.push({kind,id:record.id});
+  }
+  const initial=await call('/api/data');assert.equal(initial.data.schemaVersion,4);
+  assert.equal(initial.data.workouts.find(w=>w.profileId===profileId).sets[0].rpe,0);
+  for(const [kind,data,tool] of [['workout',workout,'create_workout'],['plan',plan,'create_training_plan']]){
+    for(const rpe of [7.3,10.5]){
+      const invalid={...data,sets:[{...set,rpe}]};
+      assert.equal((await call('/api/data',{method:'PUT',body:{kind,data:invalid}})).status,400);
+      const rejected=await mcp(tool,{requestId:crypto.randomUUID(),[kind==='plan'?'plan':'workout']:invalid});
+      assert.ok(rejected.data.error||rejected.data.result?.isError,'MCP must reject an invalid RPE');
+    }
+  }
+  const all=result(await mcp('get_all_fitness_data'));assert.deepEqual(all.workouts,initial.data.workouts);assert.deepEqual(all.metrics,initial.data.metrics);
+  assert.equal(result(await mcp('get_training_summary',{profileId,from:'2026-10-21',to:'2026-10-21'})).volumeKg,480);
+  assert.equal(result(await mcp('list_workouts',{profileId,from:'2026-10-22'})).workouts.length,0);
+  assert.equal((await mcp('list_workouts',{from:'2026-11-01',to:'2026-10-01'})).data.error.code,-32602);
+  const tools=(await rpc('tools/list')).data.result.tools;assert.equal(tools.length,12);assert.equal(tools.filter(t=>t.annotations.readOnlyHint).length,6);
+  assert.ok((await rpc('server/discover')).data.result.supportedVersions.includes('2026-07-28'));
+  assert.equal((await rpc('initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'qa',version:'1'}})).data.result.protocolVersion,'2025-11-25');
+  assert.equal((await call('/mcp',{method:'POST',body:null})).status,400);
+  assert.equal((await call('/mcp',{method:'POST',body:[]})).status,400);
+  assert.equal((await rpc('ping',{}, {extraHeaders:{Origin:'https://external.invalid'}})).status,403);
+  assert.equal((await rpc('ping',{}, {extraHeaders:{'MCP-Protocol-Version':'unknown'}})).status,400);
+  assert.equal((await call('/api/data',{method:'PUT',body:{kind:'workout',data:{...workout,date:'2026-02-30'}}})).status,400);
+  assert.equal((await call('/api/data',{method:'PUT',body:{kind:'workout',data:workout},extraHeaders:{Origin:'https://external.invalid'}})).status,403);
+  const existing=initial.data.workouts.find(w=>w.profileId===profileId);
+  assert.equal((await call('/api/data',{method:'PUT',body:{kind:'workout',id:existing.id,data:workout}})).status,400);
+  assert.equal((await call('/api/data',{method:'PUT',body:{kind:'workout',id:existing.id,expectedUpdatedAt:existing.updatedAt,data:{...workout,name:fixture+' edited'}}})).status,200);
+  assert.equal((await call('/api/data',{method:'PUT',body:{kind:'workout',id:existing.id,expectedUpdatedAt:existing.updatedAt,data:workout}})).status,409);
+  for(const [tool,kind,field,data] of [['workout','workout','workout',workout],['training_plan','plan','plan',plan],['body_metric','metric','metric',metric]]){
+    const requestId=crypto.randomUUID(),args={requestId,[field]:data};
+    const concurrent=await Promise.all([mcp('create_'+tool,args),mcp('create_'+tool,args)]);
+    for(const r of concurrent)assert.ok(!r.data.result.isError,JSON.stringify(r.data));
+    const a=result(concurrent[0]),b=result(concurrent[1]);assert.equal(a.record.id,b.record.id);saved.push({kind,id:a.record.id});assert.equal(a.record.createdVia,'mcp');
+    const duplicate=result(await mcp('create_'+tool,args));assert.equal(duplicate.record.id,a.record.id);assert.equal(duplicate.created,false);
+    assert.equal((await mcp('create_'+tool,{...args,[field]:{...data,...(field==='metric'?{weight:71}:{name:'different'})}})).data.result.isError,true);
+    const updated=result(await mcp('update_'+tool,{id:a.record.id,expectedUpdatedAt:a.record.updatedAt,[field]:{...data,...(field==='metric'?{weight:72}:{name:fixture+' mcp edit'})}}));assert.equal(updated.record.updatedVia,'mcp');assert.notEqual(updated.record.updatedAt,a.record.updatedAt);
+    assert.equal((await mcp('update_'+tool,{id:a.record.id,expectedUpdatedAt:a.record.updatedAt,[field]:data})).data.result.isError,true);
+    const retry=result(await mcp('create_'+tool,args));assert.equal(retry.record.id,a.record.id);assert.equal(retry.created,false);
+    assert.equal((await mcp('update_'+tool,{id:crypto.randomUUID(),expectedUpdatedAt:a.record.updatedAt,[field]:data})).data.result.isError,true);
+  }
+  assert.equal((await mcp('create_body_metric',{requestId:crypto.randomUUID(),metric:{...metric,profileId:crypto.randomUUID()}})).data.result.isError,true);
+  const movedProfile=await createProfile(),requestId=crypto.randomUUID(),original={...metric,profileId:movedProfile};
+  const moved=result(await mcp('create_body_metric',{requestId,metric:original})).record;saved.push({kind:'metric',id:moved.id});
+  assert.ok(!((await mcp('update_body_metric',{id:moved.id,expectedUpdatedAt:moved.updatedAt,metric:{...metric,profileId:'self'}})).data.result.isError));
+  assert.equal((await call('/api/data',{method:'DELETE',body:{kind:'profile',id:movedProfile}})).status,200);
+  saved.splice(saved.findIndex(x=>x.id===movedProfile),1);
+  const replay=result(await mcp('create_body_metric',{requestId,metric:original}));assert.equal(replay.record.id,moved.id);assert.equal(replay.record.profileId,'self');
+  const imported=await call('/api/import-plan',{method:'POST',body:{text:'杠铃卧推 4组×8次 60kg'}});assert.equal(imported.status,200);assert.equal(imported.data.sets.length,4);
+  assert.equal((await call('/api/import-plan',{method:'POST',body:{text:'卧推 3组×8次'},extraHeaders:{Origin:'https://external.invalid'}})).status,403);
+  console.log('PASS: owner-only access; v4 CRUD; validation; MCP protocol + 12 tools; concurrent idempotency; stale updates; deleted-profile retries; import.');
 }finally{
- for(const record of saved.reverse()){const r=await call('/api/data',{method:'DELETE',body:record});assert.equal(r.status,200);}
- console.log('Local API fixtures removed.');
+  for(const record of saved.reverse()){const r=await call('/api/data',{method:'DELETE',body:record});assert.equal(r.status,200,JSON.stringify(r.data));}
+  console.log('Local API fixtures removed.');
 }

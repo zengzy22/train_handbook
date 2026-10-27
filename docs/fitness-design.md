@@ -1,5 +1,7 @@
 # 健身训练管理站点设计
 
+> 2026-10-27 更新：以下初版“只读 MCP”和“私有站点”是历史设计。当前目标为通用远程 MCP + OAuth + 仅所有者读写，方案见 `docs/mcp-authorization-design.md`；站点路由公开可达，训练页面与数据必须通过 owner 校验。
+
 状态：已实现并私有发布。入口：https://repnote-training-journal.tukututata.chatgpt.site
 
 验证：TypeScript 校验、8 项领域测试、真实本地 D1 CRUD/跨用户隔离/MCP 集成测试、浏览器录入与刷新持久化、JSON 下载、手机无横向溢出、生产构建均已完成。线上私有登录门禁已确认，线上用户流程需用户在浏览器登录后使用。

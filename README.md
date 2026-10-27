@@ -1,36 +1,9 @@
 # Repnote · 训练手记
 
-私人健身训练管理站点，包含计划、逐组训练日志、训练日历、容量和身体指标分析、只读 MCP 与 JSON/CSV 导出。
+个人训练管理站点，支持计划、逐组训练日志、日历、容量与身体指标分析，以及仅本人授权的 MCP 读写和完整数据导出。
 
-应用源码位于 [`sites/fitness-log/`](sites/fitness-log/)，产品范围见[设计说明](docs/fitness-design.md)。站点可从根目录查看：<https://repnote-training-journal.tukututata.chatgpt.site>（私有，需使用授权的 ChatGPT 账户登录）。
+应用源码位于 [`sites/fitness-log/`](sites/fitness-log/)。安装、开发、测试、数据库迁移和 AI 连接说明见[应用 README](sites/fitness-log/README.md)。已确认的产品范围见[设计说明](docs/fitness-design.md)。
 
-## 本地运行
+站点入口：[Repnote · 训练手记](https://repnote-training-journal.tukututata.chatgpt.site)。页面和数据仅所有者登录后可用；OAuth 发现、注册与令牌交换路由公开可达。
 
-要求 Node.js 22.13.0 或更新版本。所有应用命令均从应用目录执行：
-
-```sh
-cd sites/fitness-log
-npm run install:ci
-npm run build
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_shocking_dust.sql
-npm run dev
-```
-
-开发地址以终端输出为准，通常为 `http://127.0.0.1:5173`。本地迁移只作用于 `.wrangler/state` 中的本地 D1 数据库，不会触碰生产数据。
-
-## 验证与本地 Worker 启动
-
-```sh
-cd sites/fitness-log
-npm test
-npm run typecheck
-npm run build
-npm start -- --port 5174
-REPNOTE_TEST_ORIGIN=http://127.0.0.1:5174 npm run test:api
-```
-
-`test:api` 仅接受 `localhost` 或 `127.0.0.1`，会使用独立测试用户并清理测试数据。
-
-## 配置与安全
-
-图片和复杂文本导入在部署环境中需要服务器端密钥 `DEEPSEEK_API_KEY`。将其在 Sites 部署设置中配置为密钥；不要提交真实值。[`sites/fitness-log/.env.example`](sites/fitness-log/.env.example) 只说明变量名称，项目的 `.gitignore` 会排除环境文件、密钥、依赖、构建产物和本地数据库状态。
+通用 MCP：`https://repnote-training-journal.tukututata.chatgpt.site/agent/mcp`。使用 OAuth 授权，支持独立读取/写入权限与逐连接撤销。原生 Sites 插件继续使用 `/mcp`。见[连接说明](docs/agent-connection-matrix.md)与[授权设计](docs/mcp-authorization-design.md)。

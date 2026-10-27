@@ -27,11 +27,11 @@ export function csvCell(value: unknown) {
 export function toCSV(snapshot: Snapshot, kind: 'profiles'|'workouts'|'sets'|'plans'|'metrics') {
   let rows: Record<string,unknown>[];
   if(kind==='profiles') rows=snapshot.profiles;
-  else if(kind==='sets') rows=snapshot.workouts.flatMap(w=>w.sets.map((s,i)=>({profileId:w.profileId??'self',workoutId:w.id,date:w.date,workoutName:w.name,workoutStatus:w.status,order:i+1,...s,components:s.components?JSON.stringify(s.components):''})));
+  else if(kind==='sets') rows=snapshot.workouts.flatMap(w=>w.sets.map((s,i)=>({profileId:w.profileId??'self',workoutId:w.id,date:w.date,workoutName:w.name,workoutStatus:w.status,createdVia:w.createdVia,updatedVia:w.updatedVia,order:i+1,...s,components:s.components?JSON.stringify(s.components):''})));
   else if(kind==='workouts') rows=snapshot.workouts.map(({sets,...w})=>({...w,profileId:w.profileId??'self',setCount:sets.length}));
-  else if(kind==='plans') rows=snapshot.plans.flatMap(p=>p.sets.map((s,i)=>({profileId:p.profileId??'self',planId:p.id,name:p.name,description:p.description,createdAt:p.createdAt,updatedAt:p.updatedAt,order:i+1,...s,components:s.components?JSON.stringify(s.components):''})));
+  else if(kind==='plans') rows=snapshot.plans.flatMap(p=>p.sets.map((s,i)=>({profileId:p.profileId??'self',planId:p.id,name:p.name,description:p.description,createdAt:p.createdAt,updatedAt:p.updatedAt,createdVia:p.createdVia,updatedVia:p.updatedVia,order:i+1,...s,components:s.components?JSON.stringify(s.components):''})));
   else rows=snapshot.metrics.map(m=>({...m,profileId:m.profileId??'self'}));
   const fallback={profiles:['id','name','birthDate','sex','heightCm','notes','createdAt','updatedAt'],workouts:['id','profileId','name','date','durationMinutes','calories','calorieSource','feeling','status','notes','createdAt','updatedAt','setCount'],sets:['profileId','workoutId','date','workoutName','workoutStatus','order','id','groupId','exercise','muscle','weight','reps','durationSeconds','durationMaxSeconds','restSeconds','restMaxSeconds','mcv','components','notes','rpe','completed','warmup'],plans:['profileId','planId','name','description','createdAt','updatedAt','order','id','groupId','exercise','muscle','weight','reps','durationSeconds','durationMaxSeconds','restSeconds','restMaxSeconds','mcv','components','notes','rpe','completed','warmup'],metrics:['id','profileId','date','weight','bodyFat','restingHeartRate','source','notes','createdAt','updatedAt']};
-  const columns=fallback[kind];
+  const columns=[...fallback[kind],'createdVia','updatedVia'];
   return '\uFEFF'+[columns.map(csvCell).join(','),...rows.map(r=>columns.map(k=>csvCell(r[k])).join(','))].join('\r\n');
 }

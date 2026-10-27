@@ -1,6 +1,6 @@
 # Repnote · 训练手记
 
-个人训练日志：逐组重量、次数、时间、休息、RPE、热身/完成标记；支持同一组内依次完成多个动作。独立计划模板、训练日历与趋势分析。一个登录账号可管理多位用户的独立资料与训练数据。支持私有 Sites 云端数据、只读 MCP 和 JSON/CSV 导出。
+个人训练日志：逐组重量、次数、时间、休息、RPE、热身/完成标记；支持同一组内依次完成多个动作。独立计划模板、训练日历与趋势分析。仅所有者登录访问，可管理多位对象的独立资料。支持 Sites 云端数据、OAuth MCP 读写和 JSON/CSV 导出。
 
 ## 本地开发
 
@@ -12,6 +12,8 @@ npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_shocking_dust.sql
 npm run dev
 ```
+
+运行预览前，按 `dev.vars.example` 创建忽略的 `.dev.vars`。本地 owner 为 `local_seedy`，使用构建后预览时 `REPNOTE_ORIGIN=http://127.0.0.1:5174`；开发服务器则改为其实际 origin。构建后运行：`npm start -- --port 5174 --env-file /你的绝对路径/sites/fitness-log/.dev.vars`。环境文件参数使用绝对路径。生产的 `REPNOTE_OWNER_ID` 必须配置为现有数据所属的 Site-scoped ID，不能使用平台账号管理 ID；`REPNOTE_ORIGIN` 是正式 HTTPS origin。缺少 owner 配置时服务拒绝放行。
 
 开发地址以终端输出为准，默认 `http://127.0.0.1:5173`。开发预览模拟本地用户；不包含真实生产身份或数据。生产数据库与 `.wrangler/state` 本地数据库相互独立。迁移仅对尚未应用的本地数据库执行一次，后续迁移按顺序应用。
 
@@ -30,7 +32,8 @@ API 集成测试只能对 localhost/127.0.0.1 执行，生成独立测试用户�
 - `app/fitness-app.tsx`：五个页面、右上角用户切换与资料、训练、计划、身体指标编辑器。
 - `app/globals.css`：暖白/石墨/橙色主题、移动端布局与深色偏好。
 - `app/api/data/route.ts`：带身份、来源检查和输入验证的 CRUD。
-- `app/mcp/route.ts`：只读 JSON-RPC MCP。
+- `app/mcp/route.ts`：Sites 原生 MCP；`app/agent/mcp/route.ts`：通用 OAuth MCP。
+- `app/oauth/`、`lib/oauth-*`：基于已有 Sites 登录的下游 OAuth 委托授权；`app/api/agent-grants/`：owner 管理授权。
 - `lib/model.ts`：输入契约、单位与日期；`lib/analytics.ts`：统一统计与 CSV。
 - `lib/repository.ts`：每次操作都限定用户 ID；`db/schema.ts`、`drizzle/`：D1 表与迁移。
 
@@ -58,10 +61,18 @@ API 集成测试只能对 localhost/127.0.0.1 执行，生成独立测试用户�
 - `list_training_plans`：可选 `profileId`。
 - `get_training_summary`：可选 `profileId` 与日期范围，统计及计算口径。上述按资料查询默认 `self`。
 
-`POST /mcp` 支持 `server/discover`（2026-07-28）、`tools/list`、`tools/call`，并兼容传统 initialize。平台为原生插件认证，工具继续检查站点用户身份，不提供 AI 写入。
+新增 `create_workout`、`update_workout`、`create_training_plan`、`update_training_plan`、`create_body_metric`、`update_body_metric` 六个写工具。创建要求 UUID `requestId` 和完整 `workout`/`plan`/`metric`；重试复用同一 requestId，不重复创建。更新要求记录 ID、读取时的 `expectedUpdatedAt` 和完整领域对象；版本冲突后重新读取。没有删除或资料管理工具。网页与 MCP 使用同一验证/持久化服务。
+
+`/mcp` 支持 Sites `server/discover`（2026-07-28）及标准 initialize；`/agent/mcp` 提供标准 Streamable HTTP，JSON 响应，无 SSE，GET 返回405。原生入口检查 Sites 身份及 owner；通用入口检查独立 bearer token 和 scope。
+
+通用客户端填写正式 origin 加 `/agent/mcp`，通过 OAuth 发现与动态注册开始连接。只有所有者可登录并批准授权；`repnote:read` 和 `repnote:write` 独立。授权码采用 PKCE S256，令牌仅存摘要；access 一小时，refresh 三十天，刷新轮换并检测重放。数据页可逐条断开外部授权，原生插件在产品插件设置中管理。客户端支持 OAuth/远程 MCP 才能使用；具体产品实测状态见根目录 `docs/agent-connection-matrix.md`。
+
+快照为 schemaVersion 4，记录包含 `createdVia` 和 `updatedVia`，值为 `web` 或 `mcp`。CSV 保留来源。所有网页更新也参与版本检查，冲突保留当前编辑并刷新快照。
 
 「AI 与数据」可导出全部 JSON，以及用户、训练、每组、计划、身体指标五类 CSV。JSON 包含 schemaVersion、导出时间、资料关联 ID、单位定义和来源；CSV 保留原始行与 ID，并转义表格公式。其他 AI 可以读取这些导出文件。私有 MCP 地址本身不是访问凭据；实时外部集成需要额外的平台服务认证与用户授权，不声称支持任意客户端免配置连接。
 
 ## 部署与安全
 
-遵循 Sites 技能，经 source helper 同步、打包后私有发布。平台提供登录与访问边界；所有个人记录仍按站点用户 ID 隔离。不要提交 `.wrangler/`、`.sites-runtime/`、环境文件或凭据，不向生产库写入演示/验收数据。
+遵循 Sites 工作流，经 source helper 同步、打包后发布，保留 project ID 和 D1。保持现有 public 路由可达性以提供公开 OAuth 发现/交换入口；网页、数据、导入及授权操作仍由应用强制仅 owner 访问，通用 MCP 必须持有 owner 批准的 token。不要提交 `.wrangler/`、`.sites-runtime/`、`.dev.vars`、环境文件或凭据，不向生产库写入演示/验收数据。
+
+本地数据库需依次执行 `drizzle/` 下尚未应用的迁移，既有 SQL 不可重复执行。领域与协议测试：`npm test`；类型检查：`npm run typecheck`；生产构建：`npm run build`；本地 API：`npm run test:api`；OAuth 全流程：`node tests/oauth.integration.mjs`。OAuth 测试同样仅允许 localhost，会清理本轮数据、客户端和 grant 夹具。
